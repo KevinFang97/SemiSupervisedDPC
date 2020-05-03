@@ -208,11 +208,12 @@ def main():
                 f.close()
 
 
-    if config['mode'] == 'offline':
-        os.makedirs('results/offline-mode/{}'.format(config['date']), exist_ok=True)
-        sio.savemat('results/offline-mode/{}/{}-results-val_seq-{}-test_seq-{}'.format(config['date'], ts, args.val_seq[0], args.test_seq[0]),results)
-        torch.save(model.state_dict(), 'results/offline-mode/{}/{}-val_seq-{}-test_seq-{}.pth'.format(config['date'], ts, args.val_seq[0], args.test_seq[0]))
-
+        if config['mode'] == 'offline' and epoch%4 == 0:
+            os.makedirs('results/offline-mode/{}'.format(config['date']), exist_ok=True)
+            sio.savemat('results/offline-mode/{}/{}-results-val_seq-{}-test_seq-{}-epoch-{}'.format(config['date'], ts, args.val_seq[0], args.test_seq[0],epoch),results)
+            torch.save(model.state_dict(), 'results/offline-mode/{}/{}-val_seq-{}-test_seq-{}-epoch-{}.pth'.format(config['date'], ts, args.val_seq[0], args.test_seq[0],epoch))
+            torch.save(optimizer.state_dict(), 'results/offline-mode/{}/optimizer-{}-val_seq-{}-test_seq-{}-epoch-{}.pth'.format(config['date'], ts, args.val_seq[0], args.test_seq[0],epoch))
+    
     duration = timeSince(start)
     print("Training complete (duration: {})".format(duration))
 
