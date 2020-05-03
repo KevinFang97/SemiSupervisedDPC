@@ -65,7 +65,7 @@ class Compute_Loss(nn.modules.Module):
         self.exp_loss = exp_loss
         self.exp_weight = exp_weight
         
-    def forward(self, current_img, target_img, pose, exp_mask, disparities, intrinsics, pose_vec_weight=None, validate=False):
+    def forward(self, current_img, target_img, pose, exp_mask, disparities, intrinsics, pose_vec_weight=None, validate=False, corr=None, gt_corr=None):
         loss = 0
         depth = [1.0/disp for disp in disparities]
         current_pose = -pose.clone()
@@ -75,4 +75,7 @@ class Compute_Loss(nn.modules.Module):
                
         if exp_mask[0] is not None and validate==False:
             loss += self.exp_weight*self.exp_loss(exp_mask)
+
+        #add semisupervised loss
+        
         return loss

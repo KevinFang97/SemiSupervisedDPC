@@ -5,7 +5,7 @@ sys.path.insert(0,'..')
 from utils.learning_helpers import *
 from utils.lie_algebra import se3_log_exp
 
-def Train(device, pose_model, spatial_trans, dset, loss, optimizer,epoch):
+def Train(device, pose_model, spatial_trans, dset, loss, optimizer,epoch, supervised=False):
     start = time.time()
     pose_model.train(True)  # Set model to training mode
     spatial_trans.train(False)
@@ -15,7 +15,7 @@ def Train(device, pose_model, spatial_trans, dset, loss, optimizer,epoch):
         # Iterate over data.
     for data in dset:
             # get the inputs (we only use the images, intrinsics, and vo_lie_alg)
-        imgs, _, intrinsics, vo_lie_alg, _ = data
+        imgs, _, intrinsics, vo_lie_alg, gt_corr = data
         vo_lie_alg = vo_lie_alg.type(torch.FloatTensor).to(device)
         
         img_list = []
@@ -27,7 +27,10 @@ def Train(device, pose_model, spatial_trans, dset, loss, optimizer,epoch):
         corr, exp_mask, disparities = pose_model(img_list[0:3], vo_lie_alg)
         pose = se3_log_exp(corr, vo_lie_alg)
 
-        minibatch_loss = loss(img_list[-2], img_list[-1], pose, exp_mask, disparities, intrinsics, pose_vec_weight = vo_lie_alg)
+        if not supervised:
+            minibatch_loss = loss(img_list[-2], img_list[-1], pose, exp_mask, disparities, intrinsics, pose_vec_weight = vo_lie_alg)
+        else:
+            minibatch_loss = loss(img_list[-2], img_list[-1], pose, exp_mask, disparities, intrinsics, pose_vec_weight = vo_lie_alg, corr=corr, gt_corr = gt_corr)
 
         optimizer.zero_grad()
         minibatch_loss.backward()
