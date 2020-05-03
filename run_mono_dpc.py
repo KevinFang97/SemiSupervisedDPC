@@ -42,6 +42,7 @@ parser.add_argument('--save_results', action='store_true', default=False)
 parser.add_argument('--mode', type=str, default='online')
 parser.add_argument("--estimator_type", type=str, default='mono')
 parser.add_argument('--use_ssim', action='store_true', default=False)
+parser.add_argument('--smo_weight', type=float, default=0.05)
 args = parser.parse_args()
 config={
     'num_frames': None,
@@ -83,7 +84,7 @@ def main():
         criterion = losses.photometric_reconstruction_loss()
     exp_loss = losses.explainability_loss()
     Reconstructor = stn.Reconstructor().to(device)
-    loss = losses.Compute_Loss(Reconstructor, criterion, exp_loss, exp_weight = config['exp_weight'])
+    loss = losses.Compute_Loss(Reconstructor, criterion, exp_loss, exp_weight = config['exp_weight'], smo_weight=args.smo_weight)
     model = mono_model_joint.joint_model(num_img_channels=(6 + 2*config['use_flow']), output_exp=args.exploss, dropout_prob=config['dropout_prob'], mode=args.mode).to(device)
 
     params = list(model.parameters())
