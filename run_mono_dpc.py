@@ -18,11 +18,11 @@ import argparse
 import scipy.io as sio
 import torch.backends.cudnn as cudnn
 import os
- 
+
 device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
 
 parser = argparse.ArgumentParser(description='training arguments.')
-parser.add_argument('--data_dir', type=str, default='/media/datasets/KITTI-downsized')
+parser.add_argument('--data_dir', type=str, default='/home/mscv/npc/kitti-downsized')
 parser.add_argument('--date', type=str, default='0000000')
 parser.add_argument('--train_seq', nargs='+', type=str, default=['00'])
 parser.add_argument('--val_seq', nargs='+',type=str, default=['00'])
@@ -39,15 +39,17 @@ parser.add_argument('--dropout_prob', type=float, default=0.3)
 parser.add_argument('--use_flow', action='store_true',default=False)
 parser.add_argument('--normalize_img', action='store_true',default=False)
 parser.add_argument('--save_results', action='store_true', default=False)
-parser.add_argument('--mode', type=str, default='online')
+parser.add_argument('--mode', type=str, default='offline')
 parser.add_argument("--estimator_type", type=str, default='mono')
+parser.add_argument('--use_ssim', action='store_true', default=False)
+parser.add_argument('--smo_weight', type=float, default=0.05)
 args = parser.parse_args()
 config={
     'num_frames': None,
     'skip':1,    ### if not one, we skip every 'skip' samples that are generated ({1,2}, {2,3}, {3,4} becomes {1,2}, {3,4})
     'correction_rate': 1, ### if not one, only perform corrections every 'correction_rate' frames (samples become {1,3},{3,5},{5,7} when 2)
     'img_per_sample': 2,
-    'minibatch': 32,       ##minibatch size      
+    'minibatch': 32,       ##minibatch size
     'augment_backwards': False,
     }
 for k in args.__dict__:
@@ -75,18 +77,21 @@ def main():
     now= datetime.datetime.now()
     ts = '{}-{}-{}-{}-{}'.format(now.year, now.month, now.day, now.hour, now.minute)
     print(ts)
-    
-    criterion = losses.photometric_reconstruction_loss()
+
+    if args.use_ssim:
+        criterion = losses.photometric_reconstruction_loss_with_ssim()
+    else:
+        criterion = losses.photometric_reconstruction_loss()
     exp_loss = losses.explainability_loss()
     Reconstructor = stn.Reconstructor().to(device)
-    loss = losses.Compute_Loss(Reconstructor, criterion, exp_loss, exp_weight = config['exp_weight'])
+    loss = losses.Compute_Loss(Reconstructor, criterion, exp_loss, exp_weight = config['exp_weight'], smo_weight=args.smo_weight)
     model = mono_model_joint.joint_model(num_img_channels=(6 + 2*config['use_flow']), output_exp=args.exploss, dropout_prob=config['dropout_prob'], mode=args.mode).to(device)
 
     params = list(model.parameters())
     optimizer = torch.optim.Adam(params, lr=config['lr'], weight_decay = config['wd']) #, amsgrad=True)
 
     cudnn.benchmark = True
-    
+
     est_traj_stacked ={}
     corr_pose_change_vecs_stacked = {}
     corr_stacked = {}
@@ -100,36 +105,36 @@ def main():
         corr_stacked[key] = np.copy(corr_pose_change_vecs_stacked[key])
         best_val_loss[key], best_rot_seg_err[key], best_trans_err[key], most_loop_closure[key]  = 1e5, 1e5, 1e5, 0
 
-    
+
     for epoch in range(0,config['num_epochs']):
-        optimizer = exp_lr_scheduler(model, optimizer, epoch, lr_decay_epoch=config['lr_decay_epoch']) ## reduce learning rate as training progresses  
-        
+        optimizer = exp_lr_scheduler(model, optimizer, epoch, lr_decay_epoch=config['lr_decay_epoch']) ## reduce learning rate as training progresses
+
         train_loss = Train_Mono(device,model, Reconstructor, dset_loaders['train'], loss, optimizer, epoch)
-        val_loss = Validate(device, model, Reconstructor, dset_loaders['val'], loss)      
-#        
+        val_loss = Validate(device, model, Reconstructor, dset_loaders['val'], loss)
+#
         if epoch == 0:
             writer = SummaryWriter(comment="-val_seq-{}-test_seq-{}".format(args.val_seq[0], args.test_seq[0]))
         writer.add_scalars('',{'train': train_loss, 'val': val_loss}, epoch+1)
         for key, dset in eval_dsets.items():
             print("{} Set, Epoch {}".format(key, epoch))
-            
+
             ###plot images, depth map, explainability mask
             img_array, disparity, exp_mask = test_depth_and_reconstruction(device, model, Reconstructor, dset)
             img_array = plot_img_array(img_array)
             depth = plot_disp(disparity[-1])
-            writer.add_image(key+'/imgs',img_array,epoch+1) 
+            writer.add_image(key+'/imgs',img_array,epoch+1)
             writer.add_image(key+'/depth', depth, epoch+1)
-            
+
             if args.exploss:
                 exp_mask = plot_img_array(exp_mask)
                 writer.add_image(key+'/exp_mask', exp_mask, epoch+1)
-                
-            ###plot trajectories    
+
+            ###plot trajectories
             corr, gt_corr, corr_pose_change_vec, odom_pose_change_vec, gt_pose_change_vec, corr_traj, corr_traj_rot, est_traj, gt_traj, \
                 rot_seg_err, trans_err, cum_dist = test_trajectory(device, model, Reconstructor, dset, epoch)
 
-            corrections = plot_6_by_1(corr, title = 'Corrections')                                          
-            correction_errors = plot_6_by_1(np.abs(corr - gt_corr), title='6x1 Errors')    
+            corrections = plot_6_by_1(corr, title = 'Corrections')
+            correction_errors = plot_6_by_1(np.abs(corr - gt_corr), title='6x1 Errors')
             est_traj_img = plot_multi_traj(est_traj, 'Odom.', gt_traj, 'GT', key+' Set')
             corr_traj_img = plot_multi_traj(corr_traj, 'corr.', gt_traj, 'GT', key+' Set')
             corr_traj_rot_img = plot_multi_traj(corr_traj_rot, 'corr.', gt_traj, 'GT', key+' Set')
@@ -138,13 +143,13 @@ def main():
             writer.add_image(key+'/corr_traj (Rot. only)', corr_traj_rot_img, epoch+1)
             writer.add_image(key+'/est_traj', est_traj_img, epoch+1)
             writer.add_image(key+'/correction_errors', correction_errors, epoch+1)
-   
+
             corr_stacked[key] = np.vstack((corr_stacked[key], corr.reshape((1,-1,6))))
             est_traj_stacked[key] = np.vstack((est_traj_stacked[key], corr_traj_rot.reshape((1,-1,4,4))))
 #                losses_stacked = np.vstack((losses_stacked, loss_per_img_pair.reshape((1,-1))))
             corr_pose_change_vecs_stacked[key] = np.vstack((corr_pose_change_vecs_stacked[key], corr_pose_change_vec.reshape((1,-1,6))))
 
-            results[key] = {'val_seq': args.val_seq, 
+            results[key] = {'val_seq': args.val_seq,
                    'test_seq': args.test_seq,
                'epochs': epoch+1,
                'est_traj': est_traj_stacked[key],
@@ -152,10 +157,10 @@ def main():
                'est_traj_reconstruction_loss': losses_stacked[key],
                'corr_pose_vecs': corr_pose_change_vecs_stacked[key],
                'odom_pose_vecs': odom_pose_change_vec,
-               'gt_traj': gt_traj, 
+               'gt_traj': gt_traj,
                }
-             
-            if args.save_results and config['mode'] == 'online':   
+
+            if args.save_results and config['mode'] == 'online':
                 os.makedirs('results/online-mode/{}'.format(config['date']), exist_ok=True)
                 if config['estimator_type'] == 'mono':
                     _, num_loop_closure, _ = find_loop_closures(corr_traj, cum_dist)
@@ -163,12 +168,12 @@ def main():
                     _, num_loop_closure, _ = find_loop_closures(corr_traj_rot, cum_dist)
                 print("{} Loop Closures detected".format(num_loop_closure))
                 ##Save the best models
-                
+
                 if val_loss < best_val_loss[key]:
                     best_val_loss[key] = val_loss
                     best_loss_epoch[key] = epoch
                     state_dict_loss = model.state_dict()
-                    print("Lowest validation loss (saving model)")       
+                    print("Lowest validation loss (saving model)")
                     if key == 'val':
                         torch.save(state_dict_loss, 'results/online-mode/{}/{}-best-loss-val_seq-{}-test_seq-{}.pth'.format(config['date'], ts, args.val_seq[0], args.test_seq[0]))
                 if rot_seg_err < best_rot_seg_err[key]:
@@ -185,7 +190,7 @@ def main():
                     print("Lowest position error (saving model)")
                     if key == 'val':
                         torch.save(state_dict_trans, 'results/online-mode/{}/{}-best_trans_acc-val_seq-{}-test_seq-{}.pth'.format(config['date'], ts, args.val_seq[0], args.test_seq[0]))
-                       
+
                 if num_loop_closure >= most_loop_closure[key]:
                     most_loop_closure[key] = num_loop_closure
                     most_loop_closure_epoch[key] = epoch
@@ -196,7 +201,7 @@ def main():
                 results[key]['best_rot_acc_epoch'] = best_rot_acc_epoch[key]
                 results[key]['best_trans_acc_epoch'] = best_trans_acc_epoch[key]
                 results[key]['best_loss_epoch'] = best_loss_epoch[key]
-                results[key]['best_loop_closure_epoch'] = most_loop_closure_epoch[key] 
+                results[key]['best_loop_closure_epoch'] = most_loop_closure_epoch[key]
                 sio.savemat('results/online-mode/{}/{}-results-val_seq-{}-test_seq-{}'.format(config['date'], ts, args.val_seq[0], args.test_seq[0]),results)
                 f = open("results/online-mode/{}/{}-config.txt".format(config['date'],ts),"w")
                 f.write( str(config) )
@@ -207,8 +212,8 @@ def main():
         os.makedirs('results/offline-mode/{}'.format(config['date']), exist_ok=True)
         sio.savemat('results/offline-mode/{}/{}-results-val_seq-{}-test_seq-{}'.format(config['date'], ts, args.val_seq[0], args.test_seq[0]),results)
         torch.save(model.state_dict(), 'results/offline-mode/{}/{}-val_seq-{}-test_seq-{}.pth'.format(config['date'], ts, args.val_seq[0], args.test_seq[0]))
-    
-    duration = timeSince(start)    
+
+    duration = timeSince(start)
     print("Training complete (duration: {})".format(duration))
- 
+
 main()

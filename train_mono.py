@@ -5,7 +5,7 @@ sys.path.insert(0,'..')
 from utils.learning_helpers import *
 from utils.lie_algebra import se3_log_exp
 
-def Train(device, pose_model, spatial_trans, dset, loss, optimizer,epoch, supervised=False):
+def Train(device, pose_model, spatial_trans, dset, loss, optimizer,epoch, supervised=True):
     start = time.time()
     pose_model.train(True)  # Set model to training mode
     spatial_trans.train(False)
@@ -17,6 +17,7 @@ def Train(device, pose_model, spatial_trans, dset, loss, optimizer,epoch, superv
             # get the inputs (we only use the images, intrinsics, and vo_lie_alg)
         imgs, _, intrinsics, vo_lie_alg, gt_corr = data
         vo_lie_alg = vo_lie_alg.type(torch.FloatTensor).to(device)
+        gt_corr = gt_corr.type(torch.FloatTensor).to(device)
         
         img_list = []
         for im in imgs: 
