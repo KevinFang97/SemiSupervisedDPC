@@ -5,7 +5,7 @@ sys.path.insert(0,'..')
 from utils.learning_helpers import *
 from utils.lie_algebra import se3_log_exp
 
-def Train(device, pose_model, spatial_trans, dset, loss, optimizer,epoch, supervised=True):
+def Train(device, pose_model, spatial_trans, dset, loss, optimizer,epoch, supervised=False):
     start = time.time()
     pose_model.train(True)  # Set model to training mode
     spatial_trans.train(False)

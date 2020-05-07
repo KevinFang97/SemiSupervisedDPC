@@ -18,38 +18,43 @@ import argparse
 import scipy.io as sio
 import torch.backends.cudnn as cudnn
 import os
+#os.environ["CUDA_DEVICE_ORDER"]="PCI_BUS_ID"
+#os.environ["CUDA_VISIBLE_DEVICES"] = "1"
 
 device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
 
 parser = argparse.ArgumentParser(description='training arguments.')
 parser.add_argument('--data_dir', type=str, default='/home/mscv/npc/kitti-downsized')
 parser.add_argument('--date', type=str, default='0000000')
-parser.add_argument('--train_seq', nargs='+', type=str, default=['00'])
+parser.add_argument('--train_seq', nargs='+', type=str, default=['02','05','06','07','08'])
 parser.add_argument('--val_seq', nargs='+',type=str, default=['00'])
-parser.add_argument('--test_seq', nargs='+', type=str, default=['00'])
+parser.add_argument('--test_seq', nargs='+', type=str, default=['09'])
 parser.add_argument('--all_data', action='store_true', default=False)
-parser.add_argument('--augment_motion', action='store_true', default=False)
-parser.add_argument('--exploss', action='store_true', default=False)
-parser.add_argument('--wd', type=float, default=0)
-parser.add_argument('--lr', type=float, default=9e-4)
-parser.add_argument('--exp_weight', type=float, default=0.18)
-parser.add_argument('--num_epochs', type=int, default=20)
-parser.add_argument('--lr_decay_epoch', type=float, default=4)
-parser.add_argument('--dropout_prob', type=float, default=0.3)
-parser.add_argument('--use_flow', action='store_true',default=False)
-parser.add_argument('--normalize_img', action='store_true',default=False)
-parser.add_argument('--save_results', action='store_true', default=False)
+parser.add_argument('--augment_motion', action='store_true', default=True)
+parser.add_argument('--exploss', action='store_true', default=True)
+parser.add_argument('--wd', type=float, default=4e-6)
+parser.add_argument('--lr', type=float, default=5e-5)
+parser.add_argument('--exp_weight', type=float, default=0.23)
+parser.add_argument('--num_epochs', type=int, default=30)
+parser.add_argument('--lr_decay_epoch', type=float, default=10)
+parser.add_argument('--dropout_prob', type=float, default=0.5)
+parser.add_argument('--use_flow', action='store_true',default=True)
+parser.add_argument('--normalize_img', action='store_true',default=True)
+parser.add_argument('--save_results', action='store_true', default=True)
 parser.add_argument('--mode', type=str, default='offline')
 parser.add_argument("--estimator_type", type=str, default='mono')
 parser.add_argument('--use_ssim', action='store_true', default=False)
-parser.add_argument('--smo_weight', type=float, default=0.05)
+parser.add_argument('--smo_weight', type=float, default=0)
+parser.add_argument('--supervised', action='store_true', default=False)
+parser.add_argument('--model_dir', type=str, default=None)
+parser.add_argument('--optim_dir', type=str, default=None)
 args = parser.parse_args()
 config={
     'num_frames': None,
     'skip':1,    ### if not one, we skip every 'skip' samples that are generated ({1,2}, {2,3}, {3,4} becomes {1,2}, {3,4})
     'correction_rate': 1, ### if not one, only perform corrections every 'correction_rate' frames (samples become {1,3},{3,5},{5,7} when 2)
     'img_per_sample': 2,
-    'minibatch': 32,       ##minibatch size
+    'minibatch': 16,       ##minibatch size
     'augment_backwards': False,
     }
 for k in args.__dict__:
@@ -86,9 +91,13 @@ def main():
     Reconstructor = stn.Reconstructor().to(device)
     loss = losses.Compute_Loss(Reconstructor, criterion, exp_loss, exp_weight = config['exp_weight'], smo_weight=args.smo_weight)
     model = mono_model_joint.joint_model(num_img_channels=(6 + 2*config['use_flow']), output_exp=args.exploss, dropout_prob=config['dropout_prob'], mode=args.mode).to(device)
+    if args.supervised:
+        model.load_state_dict(torch.load(args.model_dir))
 
     params = list(model.parameters())
     optimizer = torch.optim.Adam(params, lr=config['lr'], weight_decay = config['wd']) #, amsgrad=True)
+    if args.supervised:
+        optimizer.load_state_dict(torch.load(args.optim_dir))
 
     cudnn.benchmark = True
 
@@ -109,7 +118,7 @@ def main():
     for epoch in range(0,config['num_epochs']):
         optimizer = exp_lr_scheduler(model, optimizer, epoch, lr_decay_epoch=config['lr_decay_epoch']) ## reduce learning rate as training progresses
 
-        train_loss = Train_Mono(device,model, Reconstructor, dset_loaders['train'], loss, optimizer, epoch)
+        train_loss = Train_Mono(device,model, Reconstructor, dset_loaders['train'], loss, optimizer, epoch, supervised=args.supervised)
         val_loss = Validate(device, model, Reconstructor, dset_loaders['val'], loss)
 #
         if epoch == 0:
@@ -208,6 +217,7 @@ def main():
                 f.close()
 
 
+#        if config['mode'] == 'offline' and epoch%4 == 0:
         if config['mode'] == 'offline' and epoch%4 == 0:
             os.makedirs('results/offline-mode/{}'.format(config['date']), exist_ok=True)
             sio.savemat('results/offline-mode/{}/{}-results-val_seq-{}-test_seq-{}-epoch-{}'.format(config['date'], ts, args.val_seq[0], args.test_seq[0],epoch),results)

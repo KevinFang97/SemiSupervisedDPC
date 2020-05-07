@@ -19,10 +19,12 @@ device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cp
 device = torch.device(0)
 
 parser = argparse.ArgumentParser(description='')
-parser.add_argument('--data_dir', type=str, default='/media/brandon/DATA/KITTI-odometry-downsized/')
-parser.add_argument('--mode', type=str, default='online')
-parser.add_argument('--estimator_type', type=str, default='stereo')
-parser.add_argument('--val_seq', nargs='+',type=str, default='19')
+parser.add_argument('--data_dir', type=str, default='/home/mscv/npc/kitti-downsized')
+parser.add_argument('--model_dir', type=str, default='NoDefaultAhahahaha')
+parser.add_argument('--output_dir', type=str, default='NoDefaultAhahahaha')
+parser.add_argument('--mode', type=str, default='offline')
+parser.add_argument('--estimator_type', type=str, default='mono')
+parser.add_argument('--val_seq', nargs='+',type=str, default='09')
 parser.add_argument('--exploss', action='store_true', default=True)
 config={
     'num_frames': None,
@@ -42,24 +44,30 @@ args = parser.parse_args()
 for k in args.__dict__:
     config[k] = args.__dict__[k]
     
-model_dirs = 'paper_plots_and_data/'
-date = 'best_stereo'
-pretrained_path = '{}/{}/2019-6-24-13-4-most_loop_closures-val_seq-00-test_seq-05.pth'.format(model_dirs, date)
+#model_dirs = 'paper_plots_and_data/'
+#date = 'baseline'
+#pretrained_path = '{}/{}/2019-6-24-13-4-most_loop_closures-val_seq-00-test_seq-05.pth'.format(model_dirs, date)
+pretrained_path = '/home/mscv/npc/SemiSupervisedDPC/results/offline-mode/'
+pretrained_path += args.model_dir
+args.output_dir = '/home/mscv/npc/SemiSupervisedDPC/exp/' + args.output_dir
 
-output_dir = '{}{}/'.format(model_dirs,date)
+#output_dir = '{}/{}/'.format(model_dirs,date)
 args.data_dir = '{}/{}'.format(args.data_dir,args.mode)
-seq = [args.val_seq] #model.replace(output_dir,'').replace('/','').replace
-figures_output_dir = '{}figs'.format(output_dir)
-os.makedirs(figures_output_dir,exist_ok=True)
-os.makedirs(figures_output_dir+'/imgs', exist_ok=True)
-os.makedirs(figures_output_dir+'/depth', exist_ok=True)
-os.makedirs(figures_output_dir+'/exp_mask', exist_ok=True)
+if isinstance(args.val_seq, list):
+    seq = args.val_seq
+else:
+    seq = [args.val_seq] #model.replace(output_dir,'').replace('/','').replace
+#figures_output_dir = '{}figs'.format(output_dir)
+#os.makedirs(figures_output_dir,exist_ok=True)
+#os.makedirs(figures_output_dir+'/imgs', exist_ok=True)
+#os.makedirs(figures_output_dir+'/depth', exist_ok=True)
+#os.makedirs(figures_output_dir+'/exp_mask', exist_ok=True)
 
 test_dset = KittiLoaderPytorch(args.data_dir, config, [seq, seq, seq], mode='test', transform_img=get_data_transforms(config)['val'])
 test_dset_loaders = torch.utils.data.DataLoader(test_dset, batch_size=config['minibatch'], shuffle=False, num_workers=4)
 eval_dsets = {'test': test_dset_loaders}
 Reconstructor = stn.Reconstructor().to(device)
-model = mono_model_joint.joint_model(num_img_channels=(6 + 2*config['use_flow']), output_exp=args.exploss, dropout_prob=config['dropout_prob']).to(device)
+model = mono_model_joint.joint_model(num_img_channels=(6 + 2*config['use_flow']), output_exp=args.exploss, dropout_prob=config['dropout_prob'], mode=args.mode).to(device)
 model.load_state_dict(torch.load(pretrained_path))
 
 _, _, _, _, _, corr_traj, corr_traj_rot, est_traj, gt_traj, _, _, _ = test_trajectory(device, model, Reconstructor, test_dset_loaders, 0)
@@ -77,4 +85,4 @@ tm_dict = {'Dense': dense_tm,
                'Ours (Gen.)': corr_tm,
                }
 est_vis = visualizers.TrajectoryVisualizer(tm_dict)
-fig, ax = est_vis.plot_topdown(which_plane='xy', plot_gt=False, outfile = 'paper_plots_and_data/figs/{}.pdf'.format(seq[0]), title=r'{}'.format(seq[0]))
+fig, ax = est_vis.plot_topdown(which_plane='xy', plot_gt=False, outfile = args.output_dir+'/{}.png'.format(seq[0]), title=r'{}'.format(seq[0]))

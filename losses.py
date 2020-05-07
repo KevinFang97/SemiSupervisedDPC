@@ -137,7 +137,7 @@ class smoothness_loss(torch.nn.Module):
 
 
 class Compute_Loss(nn.modules.Module):
-    def __init__(self, spatial_trans, photometric_loss, exp_loss, exp_weight=0.08, smo_weight=0.005, supervise_weight=2):
+    def __init__(self, spatial_trans, photometric_loss, exp_loss, exp_weight=0.08, smo_weight=0.0001, supervise_weight=3.5, rot_weight=30):
         super(Compute_Loss, self).__init__()
         self.spatial_trans = spatial_trans
         self.photometric_loss = photometric_loss
@@ -146,6 +146,7 @@ class Compute_Loss(nn.modules.Module):
         self.exp_weight = exp_weight
         self.smo_weight = smo_weight
         self.supervise_weight = supervise_weight
+        self.rot_weight = rot_weight
         
     def forward(self, current_img, target_img, pose, exp_mask, disparities, intrinsics, pose_vec_weight=None, validate=False, corr=None, gt_corr=None):
         loss = 0
@@ -160,11 +161,16 @@ class Compute_Loss(nn.modules.Module):
         
         #print(corr)
         #print(gt_corr)
-        #print(loss)
         #loss, su_loss, smo_loss before training: 0.5829, 0.1733, 99.1567
+        #print('######')
+        #print(torch.mean(torch.abs(corr[:,:3]-gt_corr[:,:3])))
+        #print(self.rot_weight*torch.mean(torch.abs(corr[:,3:]-gt_corr[:,3:])))
+        #print('######')
+        #print(loss)
         if corr is not None:
-            supervised_loss = torch.mean(torch.norm(corr[:,:3]-gt_corr[:,:3],dim=1) + torch.norm(corr[:,3:] - gt_corr[:,3:],dim=1))
-            #print(supervised_loss)
+            supervised_loss = torch.mean(torch.abs(corr[:,:3]-gt_corr[:,:3]) +
+                                        self.rot_weight * torch.abs(corr[:,3:] - gt_corr[:,3:]))
+            #print(self.supervise_weight *supervised_loss)
             loss += self.supervise_weight * supervised_loss
 
         smooth_loss = self.smo_weight*self.smo_loss(target_img, depth)
